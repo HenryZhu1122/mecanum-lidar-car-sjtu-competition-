@@ -25,7 +25,7 @@
 
 const int F_ANGLE = 180;
 const int L_ANGLE = 110;
-const int R_ANGLE = 250;
+const int R_ANGLE = 250; //侧前方的数据更有价值
 
 const float BASE_SPEED = 60.0;     //直行速度
 const float CORRECT_SPEED = 20.0;  //横向速度
@@ -60,19 +60,14 @@ unsigned long modeStartTime = 0;
 unsigned long lastControlTime = 0;
 unsigned long lastPrintTime = 0;
 unsigned long lastGoodLidarTime = 0;
-unsigned long lastLidarRestartTime = 0;
+unsigned long lastLidarRestartTime = 0;//等待后续优化
 
-// 这里的 fl/fr/bl/br 都按照“正值=该轮向前转”理解
-// 根据你实测：
-// 第1路：左后，正值后转，负值前转
-// 第2路：右后，正值后转，负值前转
-// 第3路：右前，正值前转，负值后转
-// 第4路：左前，正值前转，负值后转
+
 void driveFixed(float fl, float fr, float bl, float br) {
   const float FL_TRIM = 1.00;
-  const float FR_TRIM = 1.00;  // 右前轮补偿，先加到1.30
+  const float FR_TRIM = 1.00;  
   const float BL_TRIM = 1.00;
-  const float BR_TRIM = 1.00;
+  const float BR_TRIM = 1.00;//万一有的轮子不听话呢
 
   fl *= FL_TRIM;
   fr *= FR_TRIM;
@@ -91,7 +86,7 @@ void setSpeed(float speedX, float speedY, float angularW) {
   float fl = speedX + speedY + angularW;
   float fr = speedX - speedY - angularW;
   float bl = speedX - speedY + angularW;
-  float br = speedX + speedY - angularW;
+  float br = speedX + speedY - angularW;//对速度进行叠加
 
   float maxVal = max(max(fabs(fl), fabs(fr)), max(fabs(bl), fabs(br)));
 
@@ -131,7 +126,7 @@ void turnRight(float speed) {
 }
 
 void stopCar() {
-  setSpeed(0, 0, 0);
+  setSpeed(0, 0, 0);//后续还要加一种倒车状态
 }
 
 bool isValidDistance(float d) {
@@ -148,7 +143,7 @@ float getAvgDistance(int centerAngle, int range) {
 
     if (isValidDistance(d)) {
       sum += d;
-      count++;
+      count++;//剔除无效数据
     }
   }
 
@@ -156,12 +151,13 @@ float getAvgDistance(int centerAngle, int range) {
     return -1;
   }
 
-  return sum / count;
+  return sum / count;//算一定范围的平均值
 }
 
 void startTurnLeft() {
   currentMode = MODE_TURN_LEFT;
   modeStartTime = millis();
+  //后续重点提升部分，这个拐角速度，时间都需要进行进一步优化
   DBG_PRINTLN("开始左转");
 }
 
@@ -189,7 +185,7 @@ void handleRun() {
     DBG_PRINTLN(right);
   }
 
-  // 如果三个方向都没有数据，不要盲目前进，先停车
+
   if (front < 0 && left < 0 && right < 0) {
     stopCar();
     DBG_PRINTLN("雷达暂无有效数据，停车保护");
@@ -250,7 +246,7 @@ void handleRun() {
       DBG_PRINTLN("开始向左纠正偏移");
     }
   }
-
+//此部分后续需要进行重点优化，偏移的时间和速度应该与两端的距离差相关
   setSpeed(BASE_SPEED, lateralSpeed, 0);
 }
 
@@ -264,6 +260,7 @@ void handleTurnLeft() {
     currentMode = MODE_RUN;
     modeStartTime = millis();
     DBG_PRINTLN("左转完了，重新直行");
+    //后续需要思考如何保证拐弯后实现直行
   }
 }
 
@@ -278,7 +275,7 @@ void handleTurnRight() {
   }
 }
 
-//进入状态
+//启动
 
 void setup() {
   DBG_BEGIN(115200);
@@ -305,10 +302,10 @@ void loop() {
 
     if (angle >= 0 && angle < 360) {
       lidarDistances[angle] = dist;
-      lastGoodLidarTime = millis();
+      lastGoodLidarTime = millis();//读取雷达数据
     }
   } else {
-    // 偶尔读取失败不用管，只有长时间没有成功读到点才重启
+
     if (millis() - lastGoodLidarTime > 1500 && millis() - lastLidarRestartTime > 1500) {
       stopCar();
       lidar.startScan();
@@ -317,7 +314,7 @@ void loop() {
     }
   }
 
-  // 控制逻辑不再依赖 isNewScan，每 50ms 执行一次
+  // 直接每 50ms 执行一次喵，反正肯定可以读完喵
   if (millis() - lastControlTime >= 50) {
     lastControlTime = millis();
 
