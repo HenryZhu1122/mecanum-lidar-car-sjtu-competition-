@@ -38,11 +38,13 @@ const float SIDE_DIFF_MARGIN = 100;    //纠偏最小
 const float VALID_MIN = 0;           // 搞个下界就够了
 
 const int AVG_RANGE = 20;              // 取中心角左右
-const unsigned long TURN_DURATION = 900;  // 转弯持续时间
+const unsigned long TURN_DURATION = 870;  // 转弯持续时间
+const unsigned long POST_TURN_RUN = 400;  // 转后强制直行时间
 
 #define MODE_RUN         0
 #define MODE_TURN_LEFT   1
 #define MODE_TURN_RIGHT  2
+#define MODE_POST_TURN   3
 
 RPLidar lidar;
 
@@ -257,10 +259,9 @@ void handleTurnLeft() {
     turnLeft(TURN_SPEED);
   } else {
     stopCar();
-    currentMode = MODE_RUN;
+    currentMode = MODE_POST_TURN;
     modeStartTime = millis();
-    DBG_PRINTLN("左转完了，重新直行");
-    //后续需要思考如何保证拐弯后实现直行
+    DBG_PRINTLN("左转完了，进入转弯后直行");
   }
 }
 
@@ -269,9 +270,19 @@ void handleTurnRight() {
     turnRight(TURN_SPEED);
   } else {
     stopCar();
+    currentMode = MODE_POST_TURN;
+    modeStartTime = millis();
+    DBG_PRINTLN("右转结束，进入转弯后直行");
+  }
+}
+void handlePostTurn() {
+  setSpeed(BASE_SPEED, 0, 0);
+
+  if (millis() - modeStartTime >= POST_TURN_RUN) {
+    stopCar();
     currentMode = MODE_RUN;
     modeStartTime = millis();
-    DBG_PRINTLN("右转结束，回到直行");
+    DBG_PRINTLN("转弯后直行结束，回到正常模式");
   }
 }
 
@@ -329,6 +340,10 @@ void loop() {
 
       case MODE_TURN_RIGHT:
         handleTurnRight();
+        break;
+      
+       case MODE_POST_TURN:
+        handlePostTurn();
         break;
     }
   }
