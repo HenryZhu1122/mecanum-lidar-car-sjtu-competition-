@@ -31,14 +31,17 @@ const float BASE_SPEED = 60.0;     //直行速度
 const float CORRECT_SPEED = 20.0;  //横向速度
 const float TURN_SPEED = 75.0;     //转弯速度
 
-const float FRONT_TURN_THRESH = 270;  //前方最小
-const float SIDE_NEAR_THRESH = 170;   //侧方最小
+const float FRONT_TURN_THRESH = 290;  //前方最小
+const float SIDE_TURN_THRESH = 50;
+const float SIDE_NEAR_THRESH = 140;   //侧方最小
 const float SIDE_DIFF_MARGIN = 100;    //纠偏最小
+const float SIDE_DIFFERENCE = 0;
+const float SIDE_CORRECTMARGIN = 400;
 
 const float VALID_MIN = 0;           // 搞个下界就够了
 
 const int AVG_RANGE = 20;              // 取中心角左右
-const unsigned long TURN_DURATION = 870;  // 转弯持续时间
+const unsigned long TURN_DURATION = 853;  // 转弯持续时间
 const unsigned long POST_TURN_RUN = 400;  // 转后强制直行时间
 
 #define MODE_RUN         0
@@ -67,7 +70,7 @@ unsigned long lastLidarRestartTime = 0;//等待后续优化
 
 void driveFixed(float fl, float fr, float bl, float br) {
   const float FL_TRIM = 1.00;
-  const float FR_TRIM = 1.00;  
+  const float FR_TRIM = 1.10;  
   const float BL_TRIM = 1.00;
   const float BR_TRIM = 1.00;//万一有的轮子不听话呢
 
@@ -194,7 +197,7 @@ void handleRun() {
     return;
   }
 
-  if (front > 0 && front < FRONT_TURN_THRESH) {
+  if (front > 0 && front < FRONT_TURN_THRESH && (left>= SIDE_TURN_THRESH || right >= SIDE_TURN_THRESH) ) {
     if (left > 0 && right > 0) {
       if (left > right) {
         startTurnLeft();
@@ -217,7 +220,7 @@ void handleRun() {
 
   float lateralSpeed = 0;
 
-  if (left > 0 && right > 0) {
+  if (left > 0 && right > 0 && front >= FRONT_TURN_THRESH ) {
     if (left < SIDE_NEAR_THRESH && right >= SIDE_NEAR_THRESH) {
       lateralSpeed = CORRECT_SPEED;
       DBG_PRINTLN("开始向右纠正偏移");
@@ -234,6 +237,11 @@ void handleRun() {
         lateralSpeed = -CORRECT_SPEED;
         DBG_PRINTLN("开始向左纠正偏移");
       }
+    }
+    else if (((left - right) >= SIDE_DIFFERENCE || (right - left) >= SIDE_DIFFERENCE )&& front >= 2* FRONT_TURN_THRESH && left <= SIDE_CORRECTMARGIN && right<= SIDE_CORRECTMARGIN)
+    {
+      lateralSpeed = -(left-right)/3;
+      DBG_PRINTLN("两边距离相差太大，开始自动纠偏");
     }
   }
   else if (left > 0) {
