@@ -44,7 +44,7 @@ const int ANGLE_FIX_A_END   = 90;
 const int ANGLE_FIX_B_START = 90;
 const int ANGLE_FIX_B_END   = 100;
 
-const float ANGLE_FIX_KP = 0.7;        // 角度修正比例系数，先小一点
+const float ANGLE_FIX_KP = 0.9;        // 角度修正比例系数，先小一点
 const float ANGLE_FIX_MAX = 20.0;       // 最大角速度修正
 const float ANGLE_FIX_DEADZONE = 0.0;  // 两段距离差小于40mm就不修
 const float ANGLE_FIX_SIGN = 1.0;       // 如果修正方向反了，改成 -1.0
@@ -52,28 +52,25 @@ const float ANGLE_FIX_SIGN = 1.0;       // 如果修正方向反了，改成 -1.
 const float VALID_MIN = 0;           // 搞个下界就够了
 
 const int AVG_RANGE = 20;              // 取中心角左右
-const unsigned long TURN_DURATION = 875;  // 转弯持续时间
+const unsigned long TURN_DURATION = 880;  // 转弯持续时间
 const unsigned long POST_TURN_RUN = 500;  // 转后强制直行时间
 
+// ===== 绕8新增参数 =====
 const float EIGHT_OPEN_THRESH = 500;  // 判断某一侧是否开阔
-const unsigned long EIGHT_PRE_TURN_RUN = 700;  // 识别到中间开口后，先直行0.5秒再转
+const unsigned long EIGHT_PRE_TURN_RUN = 650;  // 识别到中间开口后，先直行0.5秒再转
 const unsigned long EIGHT_LOCK_TIME =700;  // 绕8路口锁定时间，防止同一路口重复触发
 
 #define EIGHT_LEFT  -1
 #define EIGHT_RIGHT  1
 
-const int CENTER_ROUTE_COUNT = 8;
+const int CENTER_ROUTE_COUNT = 3;
 
-// 绕8，第一次左转，第二次右转，第三次左转，第四次右转……
+// 只用于“前方堵住，左右都开阔”的情况
+// 第一次左转，第二次右转，第三次左转，第四次右转……
 const int centerRoute[CENTER_ROUTE_COUNT] = {
   EIGHT_LEFT,
   EIGHT_RIGHT,
   EIGHT_LEFT,
-  EIGHT_RIGHT,
-  EIGHT_LEFT,
-  EIGHT_RIGHT,
-  EIGHT_LEFT,
-  EIGHT_RIGHT
 };
 
 #define MODE_RUN               0
@@ -81,6 +78,7 @@ const int centerRoute[CENTER_ROUTE_COUNT] = {
 #define MODE_TURN_RIGHT        2
 #define MODE_POST_TURN         3
 #define MODE_EIGHT_DELAY_TURN  4
+#define MODE_TURNBACK          5
 
 RPLidar lidar;
 
@@ -105,7 +103,7 @@ int centerRouteStep = 0;       // 记录“前方堵住，左右都开阔”出�
 bool eightLocked = false;      // 防止同一个路口重复触发
 unsigned long eightLockTime = 0;  // 绕8路口锁定开始时间
 bool lastLeftOpen = false;     // 上一轮左侧是否开阔，用于判断“突然开阔”
-bool lastRightOpen = false;    // 同理
+bool lastRightOpen = false;    // 上一轮右侧是否开阔，用于判断“突然开阔”
 int pendingEightDirection = 0; // 中间开口延迟转弯时，暂存要转的方向
 
 
@@ -132,7 +130,7 @@ void setSpeed(float speedX, float speedY, float angularW) {
   float fl = speedX + speedY + angularW;
   float fr = speedX - speedY - angularW;
   float bl = speedX - speedY + angularW;
-  float br = speedX + speedY - angularW;//对速度进行叠加（实验出真知）
+  float br = speedX + speedY - angularW;//对速度进行叠加
 
   float maxVal = max(max(fabs(fl), fabs(fr)), max(fabs(bl), fabs(br)));
 
@@ -172,7 +170,7 @@ void turnRight(float speed) {
 }
 
 void stopCar() {
-  setSpeed(0, 0, 0);//后续还要加一种倒车状态（新更：tmd不加了）
+  setSpeed(0, 0, 0);//后续还要加一种倒车状态
 }
 
 bool isValidDistance(float d) {
@@ -245,6 +243,7 @@ float getAngleCorrectSpeed() {
 void startTurnLeft() {
   currentMode = MODE_TURN_LEFT;
   modeStartTime = millis();
+  //后续重点提升部分，这个拐角速度，时间都需要进行进一步优化
   DBG_PRINTLN("开始左转");
 }
 
@@ -253,6 +252,8 @@ void startTurnRight() {
   modeStartTime = millis();
   DBG_PRINTLN("开始右转");
 }
+
+// ===== 绕8新增函数开始 =====
 
 bool isEightOpen(float d) {
   return d > EIGHT_OPEN_THRESH;
@@ -274,7 +275,7 @@ void startEightTurn(int direction) {
 }
 
 // 类型1：前方堵住，左右都开阔
-// 按记忆表转弯
+// 这个时候按记忆表转弯
 bool isCenterMemoryJunction(float front, float left, float right) {
   if (front < 0 || left < 0 || right < 0) {
     return false;
@@ -286,7 +287,7 @@ bool isCenterMemoryJunction(float front, float left, float right) {
 }
 
 // 类型2：前方开阔，左边或右边突然开阔
-// 向突然开阔的一侧转
+// 这个时候向突然开阔的一侧转
 bool isSideSuddenlyOpenJunction(float front, float left, float right) {
   if (front < 0 || left < 0 || right < 0) {
     return false;
@@ -320,7 +321,7 @@ int getSuddenlyOpenDirection(float left, float right) {
   return 0;
 }
 
-// 处理绕8判断
+// 尝试处理绕8判断
 // 返回 true 表示已经触发绕8转向，后面的普通L弯逻辑不要执行
 bool tryHandleEight(float front, float left, float right) {
   bool centerMemoryJunction = isCenterMemoryJunction(front, left, right);
@@ -329,7 +330,7 @@ bool tryHandleEight(float front, float left, float right) {
   bool leftOpenNow = isEightOpen(left);
   bool rightOpenNow = isEightOpen(right);
 
-  // 刚刚识别过一个绕8路口，先按时间锁住
+  // 如果刚刚识别过一个绕8路口，就先按时间锁住
   // 锁定期间不让普通L弯逻辑抢走判断
   if (eightLocked) {
     if (millis() - eightLockTime >= EIGHT_LOCK_TIME) {
@@ -354,7 +355,13 @@ bool tryHandleEight(float front, float left, float right) {
     DBG_PRINT("识别到绕8中心记忆路口，次数：");
     DBG_PRINTLN(centerRouteStep);
 
-    if (direction == EIGHT_LEFT) {
+    if(centerRouteStep == 3){
+    currentMode = MODE_TURNBACK;
+    modeStartTime = millis();
+    centerRouteStep=0;
+    return true;
+    }
+    else if (direction == EIGHT_LEFT) {
       DBG_PRINTLN("记忆表决定：左转");
     } else {
       DBG_PRINTLN("记忆表决定：右转");
@@ -366,7 +373,7 @@ bool tryHandleEight(float front, float left, float right) {
   }
 
   // 类型2：前方开阔，左边或右边突然开阔
-  // 不立刻转，先继续直行0.7秒，再向突然开阔的一侧转
+  // 不立刻转，先继续直行0.5秒，再向突然开阔的一侧转
   if (sideSuddenlyOpenJunction) {
     int direction = getSuddenlyOpenDirection(left, right);
 
@@ -392,7 +399,7 @@ bool tryHandleEight(float front, float left, float right) {
   return false;
 }
 
-//绕8函数结束
+// ===== 绕8新增函数结束 =====
 
 void handleEightDelayTurn() {
   setSpeed(BASE_SPEED, 0, 0);
@@ -431,7 +438,7 @@ void handleRun() {
     return;
   }
 
-  // 绕8判断
+  // ===== 绕8新增判断 =====
   // 只加在普通L弯判断前面，其他逻辑不动
   if (tryHandleEight(front, left, right)) {
     return;
@@ -496,7 +503,7 @@ void handleRun() {
       DBG_PRINTLN("开始向左纠正偏移");
     }
   }
-
+//此部分后续需要进行重点优化，偏移的时间和速度应该与两端的距离差相关
   float angularCorrect = 0;
 
   if (front >= 2.5 * FRONT_TURN_THRESH) {
@@ -506,6 +513,17 @@ void handleRun() {
   setSpeed(BASE_SPEED, lateralSpeed, angularCorrect);
 }
 
+void handleturnback(){
+  if (millis() - modeStartTime < 2*TURN_DURATION) {
+    turnRight(TURN_SPEED);
+  } else {
+    stopCar();
+    currentMode = MODE_POST_TURN;
+    modeStartTime = millis();
+    DBG_PRINTLN("掉头结束，进入掉头直行");
+  }
+  return;
+}
 //下面是转弯模式喵
 
 void handleTurnLeft() {
@@ -607,6 +625,9 @@ void loop() {
       case MODE_EIGHT_DELAY_TURN:
         handleEightDelayTurn();
         break;
+      case MODE_TURNBACK:
+        handleturnback();
+        break;
     }
   }
-}   
+}
